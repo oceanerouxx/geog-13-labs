@@ -1,0 +1,81 @@
+---
+title: "Geography 13"
+author: "[Oceane Roux](https://oceanerouxx.github.io/github.io/)"
+subtitle: 'Lab 02: COVID-19 Pandemic'
+output:
+  html_document:
+    theme: journal
+---
+
+
+``` {r}
+library(tidyverse)
+library(knitr)
+library(readxl)
+library(zoo)
+
+```
+
+
+# Data
+
+``` {r}
+url = 'https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv'
+covid = read.csv(url)
+
+landDate = read.csv("../data/landdata-states.csv")
+popEst = read_xls("../data/PopulationEstimates.xls", skip=2)
+```
+
+# Question 1
+
+``` {r}
+state.interest = "California"
+
+a = covid %>% 
+  filter(state== state.interest) %>%
+  group_by(county, date) %>% 
+  summarise(totalCases = sum(cases)) %>% 
+  mutate(dailyNewCases = totalCases - lag(totalCases)) %>%
+  ungroup()
+
+a %>%
+  group_by(county) %>%
+  summarise(CumulativeCases = sum(totalCases)) %>%
+  arrange(-CumulativeCases) %>%
+  slice_head(n = 5) %>%
+  knitr::kable(caption = "5 Counties With The Most Cumulative Cases")
+  
+a %>%
+  group_by(county) %>%
+  summarise(totalNewCases = sum(dailyNewCases, na.rm = TRUE)) %>%
+  arrange(-totalNewCases) %>%
+  slice_head(n = 5) %>%
+  knitr::kable(caption = "5 Counties With The Most New Cases")
+  
+
+```
+
+
+
+
+# Question 2
+
+``` {r}
+states.of.interest <- c("New York", "California", "Louisiana", "Florida")
+
+StateLevel = covid %>%
+  filter(state %in% states.of.interest) %>%
+  group_by(state, date) %>%
+  summarise(cases = sum(cases, nar.rm=TRUE)) %>%
+  mutate(dailyNewCases = cases -lag(cases), RollMean7 = rollmean(dailyNewCases, 7, fill = NA, align = "right"))
+
+ggplot(data = StateLevel, aes(x = date, y = RollMean7, group=state)) +
+  geom_line(aes(col=state)) +
+  labs(x="Date", y="Daily New Cases", title=" 7- Day Rolling Mean of COVID Cases for 2020 ", caption = "New covid cases in California, Florida, Louisiana, and New York") +
+  facet_wrap(~state) 
+  
+
+```
+
+
