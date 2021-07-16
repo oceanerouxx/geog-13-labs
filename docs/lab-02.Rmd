@@ -8,7 +8,7 @@ output:
 ---
 
 
-``` {r}
+``` {r, include=FALSE, message=FALSE}
 library(tidyverse)
 library(knitr)
 library(readxl)
@@ -19,49 +19,155 @@ library(zoo)
 
 # Data
 
-``` {r}
+``` {r, results="hide"}
 url = 'https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv'
-covid = read.csv(url)
+covid = read_csv(url)
 
-landDate = read.csv("../data/landdata-states.csv")
-popEst = read_xls("../data/PopulationEstimates.xls", skip=2)
+landDate = read_csv("C:/Users/rouxo/Documents/github/geog-13-labs/data/landdata-states.csv")
+popEst = read_xls("C:/Users/rouxo/Documents/github/geog-13-labs/data/PopulationEstimates.xls", skip=2)
 ```
 
 # Question 1
 
-``` {r}
+## Top California Counties with the Most Cumulative Cases
+``` {r, echo=FALSE}
 state.interest = "California"
 
-a = covid %>% 
-  filter(state== state.interest) %>%
-  group_by(county, date) %>% 
-  summarise(totalCases = sum(cases)) %>% 
-  mutate(dailyNewCases = totalCases - lag(totalCases)) %>%
-  ungroup()
+CAcumulative = covid %>% 
+  filter(state== state.interest, date == max(date)) %>%
+  slice_max(cases, n = 5) %>%
+  select(county, cases)
 
-a %>%
-  group_by(county) %>%
-  summarise(CumulativeCases = sum(totalCases)) %>%
-  arrange(-CumulativeCases) %>%
-  slice_head(n = 5) %>%
-  knitr::kable(caption = "5 Counties With The Most Cumulative Cases")
-  
-a %>%
-  group_by(county) %>%
-  summarise(totalNewCases = sum(dailyNewCases, na.rm = TRUE)) %>%
-  arrange(-totalNewCases) %>%
-  slice_head(n = 5) %>%
-  knitr::kable(caption = "5 Counties With The Most New Cases")
-  
+kable(CAcumulative, col.names = c("County", "Cases"), 
+               caption = "Cumulative Cases",
+               format.args = list(big.mark = ","))
 
 ```
 
+## Top California Counties with the Most New Cases
+```{r, echo=FALSE}
+state.interest = "California"
 
+CAnewcases = covid %>% 
+  filter(state== state.interest) %>%
+  group_by(county) %>% 
+  mutate(dailyNewCases = cases - lag(cases)) %>%
+  ungroup() %>% 
+  filter(date == max(date)) %>%
+  slice_max(dailyNewCases, n = 5) %>%
+  select(county, dailyNewCases)
 
+kable(CAnewcases, col.names = c("County", "Cases"),
+      caption = "New Cases",
+      format.args = list(big.mark = ","))
+
+```
+
+## Joining Population Data and California COVID Data
+```{r}
+state.interest = "California"
+
+pop = popEst %>%
+  select(Area_Name, POP_ESTIMATE_2019, FIPStxt) %>%
+  rename(fips = FIPStxt)
+
+newcovid = covid %>% 
+  filter(state== state.interest) %>%
+  group_by(county) %>% 
+  mutate(dailyNewCases = cases - lag(cases)) %>%
+  ungroup() %>% 
+  filter(date == max(date))
+
+covidpop = inner_join(newcovid, pop, by = "fips") %>%
+  filter(state == state.interest)
+
+```
+
+## Most Cumulative Cases per Capita
+```{r, echo=FALSE}
+state.interest = "California"
+
+cumcapita = covidpop %>%
+  filter(state == state.interest, date == max(date)) %>%
+  mutate(perCapita = cases/POP_ESTIMATE_2019) %>%
+  slice_max(perCapita, n = 5) %>%
+  select(county, perCapita)
+
+kable(cumcapita, col.names = c("County", "Cases per Capita"),
+      caption = "Cases per Capita",
+      format.args = list(big.mark = ","))
+
+```
+
+## Most New Cases per Capita
+```{r, echo=FALSE}
+state.interest = "California"
+
+newcapita = covidpop %>%
+  filter(state == state.interest, date == max(date)) %>%
+  mutate(dailyNewCases = cases - lag(cases)) %>%
+  mutate(perCapita = dailyNewCases/POP_ESTIMATE_2019) %>%
+  slice_max(perCapita, n = 5) %>%
+  select(county, perCapita)
+
+kable(newcapita, col.names = c("County", "Cases per Capita"),
+      caption = "New Cases per Capita",
+      format.args = list(big.mark = ","))
+
+```
+
+## Average of New Cases in the Last 14 Days per 100,000 People
+```{r, echo=FALSE, message=FALSE}
+state.interest = "California"
+
+avg_14 = covidpop %>%
+  filter(state == state.interest, date > max(date) - 14) %>%
+  group_by(county, state) %>% 
+  summarise(cases100k = sum(dailyNewCases, na.rm = TRUE)/(mean(POP_ESTIMATE_2019, na.rm = TRUE)*100000)) %>%
+  ungroup() %>%
+  group_by(state) %>%
+  summarise(total_cases_14 = sum(cases100k / 14))
+
+kable(avg_14, col.names = c("State", "Cases per 100k"),
+      caption = "New Cases per 100,00 People",
+      format.args = list(big.mark = ","),
+      digits = 9)
+```
+
+```{r}
+state.interest = "California"
+
+totalcases = covid %>% 
+  filter(state== state.interest, date == max(date)) %>%
+  summarise(sum(cases))
+  
+totalnew = covid %>% 
+  filter(state== state.interest) %>%
+  group_by(county) %>% 
+  mutate(dailyNewCases = cases - lag(cases)) %>%
+  ungroup() %>% 
+  filter(date == max(date)) %>%
+  summarise(sum(dailyNewCases))
+
+safe = covid %>%
+  filter(state== state.interest) %>%
+  group_by(county) %>% 
+  mutate(dailyNewCases = cases - lag(cases)) %>%
+  ungroup() %>% 
+  filter(date == max(date)) %>%
+  filter(dailyNewCases == "0")
+  
+```
+
+### Total cases of COVID in California: 3,839,640
+### Total new cases of COVID in California: 4131
+### Safe counties is California: 19
+ 
 
 # Question 2
 
-``` {r}
+## 7 Day Rolling Mean of COVID Cases
+``` {r, echo=FALSE, message=FALSE, warning=FALSE}
 states.of.interest <- c("New York", "California", "Louisiana", "Florida")
 
 StateLevel = covid %>%
@@ -72,8 +178,9 @@ StateLevel = covid %>%
 
 ggplot(data = StateLevel, aes(x = date, y = RollMean7, group=state)) +
   geom_line(aes(col=state)) +
-  labs(x="Date", y="Daily New Cases", title=" 7- Day Rolling Mean of COVID Cases for 2020 ", caption = "New covid cases in California, Florida, Louisiana, and New York") +
-  facet_wrap(~state) 
+  labs(x="Date", y="Daily New Cases", title="Daily New COVID Cases by State ", subtitle = "Data from NY Times") +
+  facet_wrap(~state) +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
   
 
 ```
