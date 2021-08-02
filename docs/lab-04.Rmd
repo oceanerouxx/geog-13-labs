@@ -1,0 +1,335 @@
+---
+title: "Geography 13"
+author: "[Oceane Roux](https://oceanerouxx.github.io/github.io/)"
+subtitle: 'Lab 04: Tesselations and Point-in-Polygon '
+output:
+  html_document:
+    theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(sf)
+
+library(USAboundaries)
+library(knitr)
+library(gghighlight)
+library(ggplot2)
+library(leaflet)
+library(units)
+library(readr)
+library(readxl)
+
+
+```
+
+
+# Question 1
+
+```{r, include=FALSE, warning=FALSE}
+# step 1
+counties <- USAboundaries::us_counties() %>%
+  filter(!state_name %in% c("Hawaii", "Puerto Rico", "Alaska", "Guam")) %>%
+  st_transform(5070) %>%
+  st_as_sf()
+#step 2
+centroids <- counties %>% st_centroid()
+nrow(centroids)
+
+cent_union <- centroids %>%
+  st_union()
+cent_union
+
+```
+
+```{r, warning=FALSE}
+# step 3 & 4
+boundary <- counties %>%
+  st_union() %>%
+  st_cast()
+
+voronois <- st_voronoi(cent_union) %>%
+  st_cast() %>%
+  st_as_sf() %>%
+  mutate(id = 1:n()) %>%
+  st_intersection(boundary)
+  
+plot(voronois)
+
+triangulate <-  st_triangulate(cent_union) %>%
+  st_cast() %>%
+  st_as_sf() %>%
+  mutate(id = 1:n()) %>%
+  st_intersection(boundary)
+
+plot(triangulate)
+
+gridded <- st_make_grid(counties, n = 70) %>%
+  st_cast() %>%
+  st_as_sf() %>%
+  mutate(id = 1:n()) %>%
+  st_intersection(boundary)
+
+plot(gridded)
+
+hexagonal <- st_make_grid(counties, n = 70, square = FALSE) %>% 
+  st_cast() %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n()) %>%
+  st_intersection(boundary)
+
+plot(hexagonal)
+```
+
+
+```{r, message=FALSE}
+# step 5
+mapshaper <- rmapshaper::ms_simplify(boundary, keep = .2)
+
+mapview::npts(mapshaper)
+
+mapview::npts(boundary)
+```
+
+### Using the ms_simply function, the geometry was reduced from 3229 points to 650. This allows for quicker computations due to a less complex geomtry.
+
+```{r}
+# step 6
+tessellation_plot = function(data, title){
+  ggplot() +
+    geom_sf(data = data, fill = "white", col = "navy", size = .2) +
+    theme_void() +
+    labs(title = title,
+         caption = paste("There are", nrow(data), "tiles in this tessellation"))
+}
+
+```
+
+```{r, echo=FALSE}
+# step 7
+tessellation_plot(counties, "Original Counties")
+
+tessellation_plot(voronois, "Voronoi")
+
+tessellation_plot(triangulate, "Triangulated")
+
+tessellation_plot(gridded, "Gridded")
+
+tessellation_plot(hexagonal, "Hexogonal")
+```
+
+# Question 2
+```{r, echo=FALSE}
+# step 1
+tess_sum = function(tess_type, tess_name){
+  
+  tess_type = tess_type %>%
+  mutate(area = st_area(tess_type),
+         area = units::set_units(area, "km^2"),
+         area = units::drop_units(area),
+         total_area = sum(area),
+         m_area = total_area / n(),
+         sd_area = sum(area - m_area /n()) ^ (1/2),
+         number = length(tess_type$id)
+         ) 
+  numberoffearture = length(tess_type$id)
+  
+  tess_name = tess_type %>%
+    mutate(number = numberoffearture, name = tess_name) %>%
+    select(name, number, m_area, sd_area, total_area) %>%
+    st_drop_geometry() %>%
+    head(1)
+  
+  return(tess_name)
+  
+}
+
+original = counties %>%
+  mutate(id = 1:n())
+
+
+```
+
+```{r, include=FALSE}
+# step 2
+
+tess_sum(original, "Original Counties")
+
+tess_sum(voronois, "Voronoi")
+
+tess_sum(triangulate, "Triangulated")
+
+tess_sum(gridded, "Gridded")
+
+tess_sum(hexagonal, "Hexagonal")
+```
+
+```{r, echo=FALSE, message=FALSE}
+# step 3
+tess_summary = bind_rows(tess_sum(original, "Original Counties"),
+                         tess_sum(voronois, "Voronoi"),
+                         tess_sum(triangulate, "Triangulated"),
+                         tess_sum(gridded, "Gridded"),
+                         tess_sum(hexagonal, "Hexagonal"),
+)
+
+# step 4
+knitr::kable(tess_summary,
+             caption = "Summary of Tessellations",
+             col.names = c("Tessellation", "Number of Features", "Mean Area", "Standard Deviation", "Total Area"))
+```
+
+
+
+
+
+# Question 3 
+
+```{r, warning=FALSE, echo=FALSE}
+library(readxl)
+library(dplyr)
+
+# step 1
+NID <- read_excel("../data/NID2019_U.xlsx") %>%
+  filter(!is.na(LONGITUDE)) %>%
+  filter(!is.na(LATITUDE)) %>%
+  st_as_sf(coords=c("LONGITUDE", "LATITUDE"), crs=4326) %>%
+  st_transform(5070)
+
+# step 2
+PIP <- function(points, polygons, id){
+  st_join(polygons, points) %>%
+    st_drop_geometry() %>% 
+    dplyr::count(.data[[id]]) %>% 
+    left_join(polygons, by = id) %>% 
+    st_as_sf() 
+}
+
+# step 3
+Conus_PIP <- PIP(NID, original, "id")
+
+Vor_PIP <- PIP(NID, voronois, "id")
+
+Tri_PIP <- PIP(NID, triangulate, "id")
+
+Gri_PIP <- PIP(NID, gridded, "id")
+
+Hex_PIP <- PIP(NID, hexagonal, "id")
+
+# step 4
+
+plot_PIP <- function(data, title){
+  ggplot() +
+    geom_sf(data=data, aes(fill=n), size=.2, col=NA) +
+    scale_fill_viridis_c() +
+    theme_void() +
+    labs(title = title, caption = sum(data$n))
+}
+
+# step 5
+plot_PIP(Conus_PIP, "Dams per County")
+
+plot_PIP(Vor_PIP, "Dams per Voronoi Tile")
+
+plot_PIP(Tri_PIP, "Dams per Triangulated Tile")
+
+plot_PIP(Gri_PIP, "Dams per Gridded Tile")
+```
+
+```{r}
+# plot_PIP(Hex_PIP, "Dams per Hexagonal Tile")
+# Error in FUN(X[[i]], ...) : invalid 'times' argument
+
+```
+
+# Question 4
+```{r, warning=FALSE, echo=FALSE}
+
+NID_electric <- NID %>% 
+  filter(grepl("H", NID$PURPOSES))
+electric_pip <- PIP(NID_electric, voronois, 'id')
+
+NID_fire <- NID %>% 
+  filter(grepl("P", NID$PURPOSES))
+fire_pip <- PIP(NID_fire, voronois, 'id')
+
+NID_supply <- NID %>% 
+  filter(grepl("S", NID$PURPOSES))
+supply_pip <- PIP(NID_supply, voronois, 'id')
+
+NID_fish <- NID %>% 
+  filter(grepl("F", NID$PURPOSES))
+fish_pip <- PIP(NID_fish, voronois, 'id')
+
+
+# step 2
+plot_PIPS <- function(data, title){
+  ggplot()+
+    geom_sf(data = data, aes(fill = n), size = 0.2, col = NA)+
+    gghighlight(n > (mean(data$n) + sd(data$n)))+
+    scale_fill_viridis_c()+
+    theme_void()+
+    labs(title = title, caption = paste("Total Dams:", sum(data$n)))
+}
+
+plot_PIPS(electric_pip, "Hydroelectric Dams") +
+  gghighlight::gghighlight(n > mean(n) + sd(n))
+
+plot_PIP(fire_pip, "Fire Protections Dams") +
+  gghighlight::gghighlight(n > mean(n) + sd(n))
+
+plot_PIP(supply_pip, "Flood Control Dams") +
+  gghighlight::gghighlight(n > mean(n) + sd(n))
+
+plot_PIP(fish_pip, "Fish and Wildlife Dams") +
+  gghighlight::gghighlight(n > mean(n) + sd(n))
+```
+
+
+# Extra Credit
+## Largest, at Risk, Flood Control Dams
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+counties <- USAboundaries::us_counties() %>%
+  filter(!state_name %in% c("Hawaii", "Puerto Rico", "Alaska", "Guam")) %>%
+  st_transform(5070) %>%
+  st_as_sf()
+
+mississippi = read_sf("~/github/geog-13-labs/geog-13-labs/data/majorrivers_0_0 (1)") %>% 
+  filter(SYSTEM == "Mississippi")
+
+dam = read_xlsx("~/github/geog-13-labs/geog-13-labs/data/NID2019_U.xlsx") %>% 
+ filter(!is.na(LATITUDE)) %>% 
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs = 4326) %>%
+  st_transform(5070) %>%
+  filter(HAZARD == "H") %>%
+  dplyr::select("DAM_NAME", "NID_STORAGE", "PURPOSES", "YEAR_COMPLETED")
+  
+
+dam_2 = st_join(counties, dam) %>%
+  group_by(state_abbr) %>%
+  slice_max(NID_STORAGE, n = 1) %>%
+  select(DAM_NAME, PURPOSES) %>%
+  st_drop_geometry()
+
+dam_leaf = left_join(dam_2, dam)%>%
+  st_as_sf()
+
+leaflet() %>% 
+  addProviderTiles(providers$CartoDB) %>% 
+  addPolylines(data = mississippi) %>% 
+  addCircleMarkers(data = st_transform(dam_leaf, 4326),
+                   radius = ~NID_STORAGE / 1500000,
+                   color = "red",
+                   fillOpacity = 1,
+                   stroke = FALSE,
+                   popup = leafpop::popupTable(
+                     st_drop_geometry(dam_leaf[1:4]), 
+                     feature.id = FALSE, row.number = FALSE))
+
+```
+
+
+
+
